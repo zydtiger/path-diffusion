@@ -5,6 +5,7 @@
     "**/.hg": true,
     "**/.DS_Store": true,
     "**/Thumbs.db": true,
-    "**/__pycache__": true
+    "**/__pycache__": true,
+    "**/.ruff_cache": true,
   }
 }
