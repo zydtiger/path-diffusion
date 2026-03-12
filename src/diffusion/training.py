@@ -1,21 +1,22 @@
 import torch
 import torch.nn.functional as F
+from prettyterm import track
 
 from diffusion.scheduler import LinearNoiseScheduler
 
 
 def train_epoch(
+    epoch: int,
     model: torch.nn.Module,
     dataloader,
     scheduler: LinearNoiseScheduler,
     optimizer: torch.optim.Optimizer,
     device: str,
-) -> float:
+):
     model.train()
-    total_loss = 0.0
-    num_batches = 0
 
-    for batch in dataloader:
+    pbar = track(dataloader, desc=f"Epoch {epoch + 1}")
+    for i, batch in enumerate(pbar):
         images = batch[0] if isinstance(batch, (list, tuple)) else batch
         images = images.to(device)
 
@@ -28,10 +29,8 @@ def train_epoch(
         loss.backward()
         optimizer.step()
 
-        total_loss += loss.item()
-        num_batches += 1
-
-    return total_loss / max(num_batches, 1)
+        if i % 10 == 0:
+            pbar.set_postfix({"loss": f"{loss:.3f}"})
 
 
 def train(
@@ -46,10 +45,7 @@ def train(
     scheduler_opt = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, num_epochs)
 
     for epoch in range(num_epochs):
-        loss = train_epoch(model, train_loader, scheduler, optimizer, device)
+        train_epoch(epoch, model, train_loader, scheduler, optimizer, device)
         scheduler_opt.step()
-
-        if (epoch + 1) % 10 == 0:
-            print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {loss:.4f}")
 
     return model
