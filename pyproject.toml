@@ -7,6 +7,8 @@ requires-python = ">=3.12"
 dependencies = [
     "medmnist>=3.0.2",
     "prettyterm>=0.2.4",
+    "setuptools==69.5.1",
+    "tensorboard>=2.20.0",
     "torch>=2.10.0",
     "torchvision>=0.25.0",
     "typer>=0.16.1",
