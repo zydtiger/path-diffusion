@@ -1,6 +1,9 @@
 """Entry point for PathMNIST diffusion training."""
 
+from pathlib import Path
+
 import torch
+from torchvision.utils import save_image
 
 from diffusion.config import Config
 from diffusion.dataset import get_dataset
@@ -50,6 +53,14 @@ def main() -> tuple[torch.nn.Module, LinearNoiseScheduler]:
     print("\nGenerating samples...")
     samples = sample(model, scheduler, num_samples=8, device=config.device)
     print(f"Generated {samples.size(0)} samples of shape {samples.shape}")
+
+    output_dir = Path("outputs")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Convert from [-1, 1] to [0, 1] before saving.
+    sample_images = ((samples.detach().cpu() + 1) / 2).clamp(0, 1)
+    save_image(sample_images, output_dir / "generated_samples.png", nrow=4)
+    print(f"Saved sample grid to '{output_dir / 'generated_samples.png'}'")
 
     torch.save(
         {
