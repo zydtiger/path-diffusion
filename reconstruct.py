@@ -47,12 +47,13 @@ def proximal_sample(
 
         alpha_bar_t = scheduler.alphas_cumprod[t]
         alpha_bar_prev = (
-            scheduler.alphas_cumprod[t] if t > 0 else torch.tensor((), device=device, dtype=x.dtype)
+            scheduler.alphas_cumprod_prev[t]
+            if t > 0
+            else torch.ones((), device=device, dtype=x.dtype)
         )
 
         # predict x_0
         x0_pred = (x - torch.sqrt(1 - alpha_bar_t) * predicted_noise) / torch.sqrt(alpha_bar_t)
-        x0_pred = torch.clamp(x0_pred, -1.0, 1.0)
 
         # posterior mean
         coef_x0 = torch.sqrt(alpha_bar_prev) * beta_t / (1 - alpha_bar_t)
