@@ -18,9 +18,10 @@ class Config:
     beta_end: float = 0.02
 
     # Training
-    batch_size: int = 2048
+    batch_size: int = 256
     learning_rate: float = 1e-4
     num_epochs: int = 50
+    ema_decay: float = 0.999
 
     @property
     def device(self) -> str:

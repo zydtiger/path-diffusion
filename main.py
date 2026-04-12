@@ -48,6 +48,7 @@ def main() -> tuple[torch.nn.Module, LinearNoiseScheduler]:
         config.device,
         num_epochs=config.num_epochs,
         lr=config.learning_rate,
+        ema_decay=config.ema_decay,
     )
 
     print("\nGenerating samples...")
