@@ -37,6 +37,12 @@ Use DiT instead of U-Net:
 python main.py --dit
 ```
 
+Use MedMNIST+ resolution (`224x224`):
+
+```bash
+python main.py --large
+```
+
 This will:
 
 - train the model
