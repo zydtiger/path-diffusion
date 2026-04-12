@@ -2,13 +2,16 @@ from pathlib import Path
 
 import torch
 import typer
-from torchvision.utils import save_image
+import torch.nn.functional as F
+from PIL import Image, ImageDraw, ImageFont
 
 from diffusion.dataset import get_dataset
 from diffusion.model import UNet
+from diffusion.sampling import sample
 from diffusion.scheduler import LinearNoiseScheduler
 
 app = typer.Typer(add_completion=False)
+
 
 def _auto_device() -> str:
     if torch.cuda.is_available():
@@ -17,8 +20,8 @@ def _auto_device() -> str:
         return "mps"
     return "cpu"
 
-@torch.no_grad()
 
+@torch.no_grad()
 def proximal_sample(
     model: torch.nn.Module,
     scheduler: LinearNoiseScheduler,
@@ -30,7 +33,7 @@ def proximal_sample(
     num_samples = measurement.size(0)
 
     x = torch.randn(
-        num_samples, 
+        num_samples,
         scheduler.num_channels,
         scheduler.image_size,
         scheduler.image_size,
@@ -63,24 +66,95 @@ def proximal_sample(
         if t > 0:
             posterior_var = beta_t * (1 - alpha_bar_prev) / (1 - alpha_bar_t)
             noise = torch.randn_like(x)
-            x_uncond = mean + torch.sqrt(posterior_var) * noise
-        else:
-            x_uncond = mean
-        
-        # proximal step
-        if t > 0:
-            t_prev_batch = torch.full((num_samples,), t - 1, device=device, dtype=torch.long)
-            y_noisy, _ = scheduler.q_sample(measurement, t_prev_batch)
-        else:
-            y_noisy = measurement
+            x_unknown = mean + torch.sqrt(posterior_var) * noise
 
-        x = mask * y_noisy + (1 - mask) * x_uncond
+            # RePaint conditioning: sample known pixels at the same reverse-step level.
+            # x_known ~ N(sqrt(alpha_bar_{t-1}) * x0, (1 - alpha_bar_{t-1}) I)
+            x_known = (
+                torch.sqrt(alpha_bar_prev) * measurement
+                + torch.sqrt(1 - alpha_bar_prev) * noise
+            )
+        else:
+            x_unknown = mean
+            x_known = measurement
+
+        x = mask * x_known + (1 - mask) * x_unknown
 
     return torch.clamp(x, -1.0, 1.0)
 
+
+def _to_viz(x: torch.Tensor) -> torch.Tensor:
+    return ((x.detach().cpu() + 1) / 2).clamp(0, 1)
+
+
+def _save_labeled_rows(
+    rows: list[torch.Tensor],
+    row_labels: list[str],
+    output: Path,
+    plot_image_size: int = 224,
+) -> None:
+    if not rows:
+        raise ValueError("No rows provided for visualization")
+    if len(rows) != len(row_labels):
+        raise ValueError("rows and row_labels must have the same length")
+
+    num_rows = len(rows)
+    num_samples = rows[0].shape[0]
+    num_channels = rows[0].shape[1]
+    display_rows = [
+        F.interpolate(row, size=(plot_image_size, plot_image_size), mode="nearest")
+        for row in rows
+    ]
+
+    left_label_pad = 140
+    right_pad = 8
+    top_pad = 8
+    bottom_pad = 8
+    row_gap = 4
+    col_gap = 2
+
+    grid_w = num_samples * plot_image_size + (num_samples - 1) * col_gap
+    grid_h = num_rows * plot_image_size + (num_rows - 1) * row_gap
+
+    canvas_h = top_pad + grid_h + bottom_pad
+    canvas_w = left_label_pad + grid_w + right_pad
+
+    canvas = torch.ones((num_channels, canvas_h, canvas_w), dtype=rows[0].dtype)
+
+    for row_idx, row in enumerate(display_rows):
+        row_start = top_pad + row_idx * (plot_image_size + row_gap)
+        for col_idx in range(num_samples):
+            col_start = left_label_pad + col_idx * (plot_image_size + col_gap)
+            canvas[
+                :, row_start : row_start + plot_image_size, col_start : col_start + plot_image_size
+            ] = row[col_idx]
+
+    if num_channels == 1:
+        pil_img = Image.fromarray((canvas.squeeze(0).numpy() * 255).astype("uint8"), mode="L")
+        text_fill = 0
+    else:
+        hwc = (canvas.permute(1, 2, 0).numpy() * 255).astype("uint8")
+        pil_img = Image.fromarray(hwc)
+        text_fill = (0, 0, 0)
+
+    draw = ImageDraw.Draw(pil_img)
+    try:
+        font = ImageFont.truetype("DejaVuSans.ttf", 24)
+    except OSError:
+        font = ImageFont.load_default()
+    for row_idx, label in enumerate(row_labels):
+        row_center_y = top_pad + row_idx * (plot_image_size + row_gap) + plot_image_size // 2
+        text_box = draw.textbbox((0, 0), label, font=font)
+        text_h = text_box[3] - text_box[1]
+        draw.text((10, row_center_y - text_h // 2), label, fill=text_fill, font=font)
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    pil_img.save(output)
+
+
 @app.command()
 def main(
-    checkpoint: Path = typer.Option(..., "--checkpoint", "-ckpt"),
+    checkpoint: Path = typer.Option("./diffusion_model.pt", "--checkpoint", "-ckpt"),
     num_samples: int = typer.Option(8, "--num-samples", "-n", min=1),
     output: Path = typer.Option(
         Path("outputs/reconstructed_samples.png"), "--output", "-o"
@@ -131,23 +205,27 @@ def main(
     mask[:, :, 7:21, 7:21] = 0.0
     masked_input = mask * ground_truth
 
-    # reconstruct using proximal sampling
-    typer.echo("Reconstructing samples...")
-    reconstructed = proximal_sample(model, scheduler, masked_input, mask, device=device)
+    typer.echo("Generating standard samples...")
+    standard_samples = sample(model, scheduler, num_samples=num_samples, device=device)
 
-    output.parent.mkdir(parents=True, exist_ok=True)
-    
-    gt_viz = ((ground_truth.detach().cpu() + 1) / 2).clamp(0, 1)
+    typer.echo("Reconstructing samples with proximal sampling...")
+    proximal_recon = proximal_sample(model, scheduler, masked_input, mask, device=device)
 
-    masked_viz = ((masked_input.detach().cpu() + 1) / 2).clamp(0, 1) * mask.cpu() + 0.5 * (1 - mask.cpu())
-    recon_viz = ((reconstructed.detach().cpu() + 1) / 2).clamp(0, 1)
+    gt_viz = _to_viz(ground_truth)
+    masked_viz = _to_viz(masked_input) * mask.cpu() + 0.5 * (1 - mask.cpu())
+    standard_viz = _to_viz(standard_samples)
+    proximal_viz = _to_viz(proximal_recon)
 
-    comparison = torch.stack([gt_viz, masked_viz, recon_viz], dim=0).view(-1, num_channels, image_size, image_size)
-
-    save_image(comparison, output, nrow=3)
+    _save_labeled_rows(
+        rows=[gt_viz, masked_viz, standard_viz, proximal_viz],
+        row_labels=["Original", "Masked", "Standard Sampling", "Proximal Sampling"],
+        output=output,
+        plot_image_size=224,
+    )
 
     typer.echo(f"Saved reconstructed samples to '{output}'")
-    typer.echo("Left: Ground Truth, Middle: Masked Input, Right: Reconstruction")
+    typer.echo("Rows: Original, Masked, Standard Sampling, Proximal Sampling")
+
 
 if __name__ == "__main__":
     app()
