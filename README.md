@@ -31,6 +31,12 @@ pip install -e .
 python main.py
 ```
 
+Use DiT instead of U-Net:
+
+```bash
+python main.py --dit
+```
+
 This will:
 
 - train the model
