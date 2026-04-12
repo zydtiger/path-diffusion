@@ -3,17 +3,27 @@
 from pathlib import Path
 
 import torch
+import typer
 from torchvision.utils import save_image
 
 from diffusion.config import Config
 from diffusion.dataset import get_dataset
-from diffusion.model import UNet
+from diffusion.model import DiT, UNet
 from diffusion.sampling import sample
 from diffusion.scheduler import LinearNoiseScheduler
 from diffusion.training import train
 
+app = typer.Typer(add_completion=False)
 
-def main() -> tuple[torch.nn.Module, LinearNoiseScheduler]:
+
+@app.command()
+def main(
+    dit: bool = typer.Option(
+        False,
+        "--dit",
+        help="Use a DiT backbone instead of U-Net.",
+    ),
+) -> tuple[torch.nn.Module, LinearNoiseScheduler]:
     config = Config()
 
     print("=== PathMNIST Diffusion Training ===")
@@ -24,12 +34,20 @@ def main() -> tuple[torch.nn.Module, LinearNoiseScheduler]:
     print(f"Training samples: {len(train_loader.dataset)}")  # type: ignore
     print(f"Test samples: {len(test_loader.dataset)}")  # type: ignore
 
-    print("Creating U-Net model...")
-    model = UNet(
-        image_size=config.image_size,
-        in_channels=config.num_channels,
-        out_channels=config.num_channels,
-    ).to(config.device)
+    if dit:
+        print("Creating DiT model...")
+        model = DiT(
+            image_size=config.image_size,
+            in_channels=config.num_channels,
+            out_channels=config.num_channels,
+        ).to(config.device)
+    else:
+        print("Creating U-Net model...")
+        model = UNet(
+            image_size=config.image_size,
+            in_channels=config.num_channels,
+            out_channels=config.num_channels,
+        ).to(config.device)
     print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
 
     scheduler = LinearNoiseScheduler(
@@ -71,6 +89,7 @@ def main() -> tuple[torch.nn.Module, LinearNoiseScheduler]:
                 "image_size": config.image_size,
                 "num_timesteps": config.num_timesteps,
                 "num_channels": config.num_channels,
+                "backbone": "dit" if dit else "unet",
             },
         },
         "diffusion_model.pt",
@@ -81,4 +100,4 @@ def main() -> tuple[torch.nn.Module, LinearNoiseScheduler]:
 
 
 if __name__ == "__main__":
-    main()
+    app()
