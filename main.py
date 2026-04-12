@@ -23,28 +23,37 @@ def main(
         "--dit",
         help="Use a DiT backbone instead of U-Net.",
     ),
+    large: bool = typer.Option(
+        False,
+        "--large",
+        help="Use MedMNIST+ resolution (224x224) instead of 28x28.",
+    ),
 ) -> tuple[torch.nn.Module, LinearNoiseScheduler]:
     config = Config()
+    image_size = 224 if large else config.image_size
 
     print("=== PathMNIST Diffusion Training ===")
     print(f"Device: {config.device}")
 
-    print("Loading PathMNIST dataset...")
-    train_loader, test_loader = get_dataset(batch_size=config.batch_size)
+    dataset_label = "PathMNIST+" if large else "PathMNIST"
+    print(f"Loading {dataset_label} dataset ({image_size}x{image_size})...")
+    train_loader, test_loader = get_dataset(
+        batch_size=config.batch_size, image_size=image_size
+    )
     print(f"Training samples: {len(train_loader.dataset)}")  # type: ignore
     print(f"Test samples: {len(test_loader.dataset)}")  # type: ignore
 
     if dit:
         print("Creating DiT model...")
         model = DiT(
-            image_size=config.image_size,
+            image_size=image_size,
             in_channels=config.num_channels,
             out_channels=config.num_channels,
         ).to(config.device)
     else:
         print("Creating U-Net model...")
         model = UNet(
-            image_size=config.image_size,
+            image_size=image_size,
             in_channels=config.num_channels,
             out_channels=config.num_channels,
         ).to(config.device)
@@ -54,7 +63,7 @@ def main(
         num_timesteps=config.num_timesteps,
         beta_start=config.beta_start,
         beta_end=config.beta_end,
-        image_size=config.image_size,
+        image_size=image_size,
         num_channels=config.num_channels,
     ).to(config.device)
 
@@ -88,7 +97,7 @@ def main(
             "model_state_dict": model.state_dict(),
             "scheduler_betas": scheduler.betas,
             "config": {
-                "image_size": config.image_size,
+                "image_size": image_size,
                 "num_timesteps": config.num_timesteps,
                 "num_channels": config.num_channels,
                 "backbone": "dit" if dit else "unet",

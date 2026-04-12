@@ -3,7 +3,7 @@ from torchvision import transforms
 from medmnist import PathMNIST
 
 
-def get_dataset(batch_size: int = 64) -> tuple[DataLoader, DataLoader]:
+def get_dataset(batch_size: int = 64, image_size: int = 28) -> tuple[DataLoader, DataLoader]:
     """Load PathMNIST dataset and return train/test dataloaders."""
     transform = transforms.Compose(
         [
@@ -12,8 +12,8 @@ def get_dataset(batch_size: int = 64) -> tuple[DataLoader, DataLoader]:
         ]
     )
 
-    train_dataset = PathMNIST(split="train", download=True)
-    test_dataset = PathMNIST(split="test", download=True)
+    train_dataset = PathMNIST(split="train", download=True, size=image_size)
+    test_dataset = PathMNIST(split="test", download=True, size=image_size)
 
     train_dataset.transform = transform
     test_dataset.transform = transform
