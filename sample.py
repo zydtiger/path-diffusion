@@ -6,7 +6,7 @@ import torch
 import typer
 from torchvision.utils import save_image
 
-from diffusion.model import UNet
+from diffusion.model import DiT, UNet
 from diffusion.sampling import sample
 from diffusion.scheduler import LinearNoiseScheduler
 
@@ -28,6 +28,11 @@ def main(
     output: Path = typer.Option(
         Path("outputs/generated_samples.png"), "--output", "-o"
     ),
+    dit: bool = typer.Option(
+        False,
+        "--dit",
+        help="Use DiT backbone. If omitted, checkpoint config is used when available.",
+    ),
 ) -> None:
     device = _auto_device()
 
@@ -48,11 +53,21 @@ def main(
         beta_start = 1e-4
         beta_end = 0.02
 
-    model = UNet(
-        image_size=image_size,
-        in_channels=num_channels,
-        out_channels=num_channels,
-    ).to(device)
+    backbone = str(cfg.get("backbone", "unet")).lower()
+    use_dit = dit or backbone == "dit"
+
+    if use_dit:
+        model = DiT(
+            image_size=image_size,
+            in_channels=num_channels,
+            out_channels=num_channels,
+        ).to(device)
+    else:
+        model = UNet(
+            image_size=image_size,
+            in_channels=num_channels,
+            out_channels=num_channels,
+        ).to(device)
     model.load_state_dict(ckpt["model_state_dict"])
 
     scheduler = LinearNoiseScheduler(

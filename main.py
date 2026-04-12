@@ -81,6 +81,8 @@ def main(
     save_image(sample_images, output_dir / "generated_samples.png", nrow=4)
     print(f"Saved sample grid to '{output_dir / 'generated_samples.png'}'")
 
+    checkpoint_path = "diffusion_model_dit.pt" if dit else "diffusion_model.pt"
+
     torch.save(
         {
             "model_state_dict": model.state_dict(),
@@ -92,9 +94,9 @@ def main(
                 "backbone": "dit" if dit else "unet",
             },
         },
-        "diffusion_model.pt",
+        checkpoint_path,
     )
-    print("Model saved to 'diffusion_model.pt'")
+    print(f"Model saved to '{checkpoint_path}'")
 
     return model, scheduler
 
