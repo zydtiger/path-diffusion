@@ -38,7 +38,6 @@ def sample(
         x0_pred = (x - torch.sqrt(1 - alpha_bar_t) * predicted_noise) / torch.sqrt(
             alpha_bar_t
         )
-        x0_pred = torch.clamp(x0_pred, -1, 1)
 
         # Posterior mean q(x_{t-1} | x_t, x_0).
         coef_x0 = beta_t * torch.sqrt(alpha_bar_prev) / (1 - alpha_bar_t)
