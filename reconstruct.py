@@ -63,6 +63,7 @@ def proximal_sample(
     adjoint_op: Callable[[torch.Tensor], torch.Tensor] | None = None,
     num_candidates_max: int = 8,
     data_consistency_eta: float = 0.0,
+    data_consistency_eta_final: float = 0.0,
     device: str = "cpu",
 ) -> torch.Tensor:
     """DPPS-style sampling for inverse problems with measurement operator A.
@@ -75,10 +76,10 @@ def proximal_sample(
     if adjoint_op is None:
         adjoint_op = forward_op
 
-    # Aligned initialization: x_T = sqrt(alpha_bar_T) * A^T y + sqrt(1-alpha_bar_T) * eps.
+    # Initialize from measurement in image space: x_T = sqrt(alpha_bar_T) * y + sqrt(1-alpha_bar_T) * eps.
     alpha_bar_T = scheduler.alphas_cumprod[-1]
     x = (
-        torch.sqrt(alpha_bar_T) * adjoint_op(measurement)
+        torch.sqrt(alpha_bar_T) * measurement
         + torch.sqrt(1 - alpha_bar_T) * torch.randn_like(measurement, device=device)
     )
 
@@ -99,6 +100,11 @@ def proximal_sample(
 
         # predict x_0
         x0_pred = (x - torch.sqrt(1 - alpha_bar_t) * predicted_noise) / torch.sqrt(alpha_bar_t)
+
+        # Data consistency schedule (applied to x_t below).
+        eta_t = (1 - 0) * (
+            data_consistency_eta - data_consistency_eta_final
+        ) + data_consistency_eta_final
 
         # posterior mean
         coef_x0 = torch.sqrt(alpha_bar_prev) * beta_t / (1 - alpha_bar_t)
@@ -134,9 +140,8 @@ def proximal_sample(
         else:
             x = mean
 
-        if data_consistency_eta > 0:
-            # Enforce Ax ~= y more strongly with one Landweber-style correction.
-            x = x - data_consistency_eta * adjoint_op(forward_op(x) - measurement)
+        if eta_t > 0:
+            x = x - eta_t * adjoint_op(forward_op(x) - measurement)
             x = torch.clamp(x, -1.0, 1.0)
 
     return torch.clamp(x, -1.0, 1.0)
@@ -147,18 +152,15 @@ def standard_inverse_sample(
     model: torch.nn.Module,
     scheduler: LinearNoiseScheduler,
     measurement: torch.Tensor,
-    adjoint_op: Callable[[torch.Tensor], torch.Tensor] | None = None,
     device: str = "cpu",
 ) -> torch.Tensor:
     """Standard ancestral reverse process initialized from noisy measurement."""
     model.eval()
     num_samples = measurement.size(0)
-    if adjoint_op is None:
-        adjoint_op = lambda z: z
 
     alpha_bar_T = scheduler.alphas_cumprod[-1]
     x = (
-        torch.sqrt(alpha_bar_T) * adjoint_op(measurement)
+        torch.sqrt(alpha_bar_T) * measurement
         + torch.sqrt(1 - alpha_bar_T) * torch.randn_like(measurement, device=device)
     )
 
@@ -236,7 +238,7 @@ def _save_labeled_rows(
     grid_h = num_rows * plot_image_size + (num_rows - 1) * row_gap
 
     canvas_h = top_pad + grid_h + bottom_pad
-    canvas_w = left_label_pad + grid_w + right_pad
+    canvas_w = int(left_label_pad + grid_w + right_pad)
 
     canvas = torch.ones((num_channels, canvas_h, canvas_w), dtype=rows[0].dtype)
 
@@ -297,6 +299,12 @@ def main(
         "--dc-eta",
         min=0.0,
         help="Per-step data-consistency strength for Ax~=y (0 disables extra enforcement).",
+    ),
+    dc_eta_final: float = typer.Option(
+        0.0,
+        "--dc-eta-final",
+        min=0.0,
+        help="Final-step data-consistency strength (cosine-decayed from --dc-eta).",
     ),
     dit: bool = typer.Option(
         False,
@@ -371,19 +379,17 @@ def main(
         ground_truth,
         kernel_size=blur_kernel_size,
         sigma=blur_sigma,
-    ).clamp(-1.0, 1.0)
+    )
 
     def blur_op(z: torch.Tensor) -> torch.Tensor:
-        return _gaussian_blur_per_channel(
-            z, kernel_size=blur_kernel_size, sigma=blur_sigma
-        ).clamp(-1.0, 1.0)
+        # Keep A linear for stable proximal/data-consistency updates.
+        return _gaussian_blur_per_channel(z, kernel_size=blur_kernel_size, sigma=blur_sigma)
 
     typer.echo("Reconstructing samples with standard inverse sampling...")
     standard_recon = standard_inverse_sample(
         model,
         scheduler,
         noisy_input,
-        adjoint_op=blur_op,
         device=device,
     )
 
@@ -396,6 +402,7 @@ def main(
         adjoint_op=blur_op,
         num_candidates_max=num_candidates_max,
         data_consistency_eta=dc_eta,
+        data_consistency_eta_final=dc_eta_final,
         device=device,
     )
 
