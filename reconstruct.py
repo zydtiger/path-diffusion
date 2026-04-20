@@ -144,6 +144,10 @@ def proximal_sample(
             x = x - eta_t * adjoint_op(forward_op(x) - measurement)
             x = torch.clamp(x, -1.0, 1.0)
 
+        if isinstance(model, DiT):
+            x = _gaussian_blur_per_channel(x, kernel_size=3, sigma=0.01)
+            x = torch.clamp(x, -1.0, 1.0)
+
     return torch.clamp(x, -1.0, 1.0)
 
 
