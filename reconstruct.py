@@ -102,7 +102,7 @@ def proximal_sample(
         x0_pred = (x - torch.sqrt(1 - alpha_bar_t) * predicted_noise) / torch.sqrt(alpha_bar_t)
 
         # Data consistency schedule (applied to x_t below).
-        eta_t = (1 - 0) * (
+        eta_t = scheduler.alphas[-t] * (
             data_consistency_eta - data_consistency_eta_final
         ) + data_consistency_eta_final
 
